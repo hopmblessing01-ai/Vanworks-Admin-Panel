@@ -16,7 +16,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { SALES_FORM_SECTIONS, type SalesSectionKey } from "@/lib/constants";
+import {
+  SALES_FORM_SECTIONS,
+  SALES_SECTION_LAYOUT,
+  type SalesSectionKey,
+} from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { uploadImage } from "@/lib/storage";
 import type { Database } from "@/lib/supabase/types";
@@ -36,27 +40,6 @@ type Item = {
 const SECTION_BY_KEY = Object.fromEntries(
   SALES_FORM_SECTIONS.map((s) => [s.key, s] as const),
 ) as Record<SalesSectionKey, (typeof SALES_FORM_SECTIONS)[number]>;
-
-// Per-section layout: how wide each section card is at the `lg` breakpoint
-// (mobile is always full width), plus how the items inside should flow.
-type SectionLayout = {
-  colsLg: 4 | 6 | 12;
-  itemsLayout: "stack" | "wrap" | "grid2";
-};
-
-const SECTION_LAYOUT: Record<SalesSectionKey, SectionLayout> = {
-  INTERIOR: { colsLg: 4, itemsLayout: "stack" },
-  KITCHEN: { colsLg: 4, itemsLayout: "stack" },
-  ELECTRICAL: { colsLg: 4, itemsLayout: "stack" },
-  WALL_COLOR: { colsLg: 6, itemsLayout: "wrap" },
-  FLOOR_COLOR: { colsLg: 6, itemsLayout: "wrap" },
-  CABIN_ADDONS: { colsLg: 6, itemsLayout: "stack" },
-  MISC_ADDONS: { colsLg: 6, itemsLayout: "stack" },
-  HVAC: { colsLg: 4, itemsLayout: "stack" },
-  GARAGE: { colsLg: 4, itemsLayout: "stack" },
-  EXTERIOR: { colsLg: 4, itemsLayout: "stack" },
-  EXTERIOR_ADDONS: { colsLg: 12, itemsLayout: "grid2" },
-};
 
 export function SalesFormTab({
   modelId,
@@ -245,7 +228,7 @@ export function SalesFormTab({
 
       <Grid container spacing={2.5}>
         {SALES_FORM_SECTIONS.map((section) => {
-          const layout = SECTION_LAYOUT[section.key];
+          const layout = SALES_SECTION_LAYOUT[section.key];
           const sectionItems = items
             .filter((i) => i.section === section.key)
             .sort((a, b) => a.sort_order - b.sort_order);

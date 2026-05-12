@@ -15,7 +15,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { BUILD_FORM_SECTIONS, type BuildSectionKey } from "@/lib/constants";
+import {
+  BUILD_FORM_SECTIONS,
+  BUILD_SECTION_LAYOUT,
+  DEFAULT_BUILD_SECTION_LAYOUT,
+  type BuildSectionKey,
+} from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
 
@@ -27,23 +32,6 @@ type Item = {
   section: BuildSectionKey;
   name: string;
   sort_order: number;
-};
-
-// Per-section layout for the build form. Sections default to a half-width
-// card (lg: 6) with items stacked one-per-line, but can opt into a wider
-// card with a multi-column inner grid.
-type BuildSectionLayout = {
-  colsLg: 4 | 6 | 12;
-  itemsLayout: "stack" | "grid2";
-};
-
-const BUILD_SECTION_LAYOUT: Partial<Record<BuildSectionKey, BuildSectionLayout>> = {
-  ELECTRICAL: { colsLg: 12, itemsLayout: "grid2" },
-};
-
-const DEFAULT_BUILD_SECTION_LAYOUT: BuildSectionLayout = {
-  colsLg: 6,
-  itemsLayout: "stack",
 };
 
 export function BuildFormTab({

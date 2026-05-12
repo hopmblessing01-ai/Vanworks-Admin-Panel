@@ -3,12 +3,18 @@ import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
 import Typography from "@mui/material/Typography";
 import { Logo } from "@/components/brand/logo";
+import { createClient } from "@/lib/supabase/server";
 
-export default function OrderLayout({
+export default async function OrderLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   return (
     <Box sx={{ minHeight: "100vh", backgroundColor: "background.default" }}>
       <Box
@@ -32,20 +38,37 @@ export default function OrderLayout({
               py: 1.5,
             }}
           >
-            <Link href="/dashboard" style={{ display: "inline-flex" }}>
+            <Link
+              href={user ? "/dashboard" : "/login"}
+              style={{ display: "inline-flex" }}
+            >
               <Logo size="sm" />
             </Link>
-            <Link
-              href="/orders"
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                color: "var(--mui-palette-text-secondary)",
-                textDecoration: "none",
-              }}
-            >
-              All orders
-            </Link>
+            {user ? (
+              <Link
+                href="/orders"
+                style={{
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "var(--mui-palette-text-secondary)",
+                  textDecoration: "none",
+                }}
+              >
+                All orders
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                style={{
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "var(--mui-palette-text-secondary)",
+                  textDecoration: "none",
+                }}
+              >
+                Sign in
+              </Link>
+            )}
           </Box>
         </Container>
       </Box>

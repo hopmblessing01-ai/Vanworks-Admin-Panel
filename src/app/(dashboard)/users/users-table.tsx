@@ -29,8 +29,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { initials } from "@/lib/utils";
-import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase/types";
+import {
+  setUserApprovedAction,
+  setUserRoleAction,
+} from "./actions";
 
 type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 
@@ -81,12 +84,8 @@ export function UsersTable({ data }: { data: Profile[] }) {
   async function updateRole(id: string, role: "admin" | "user") {
     setBusyId(id);
     try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("profiles")
-        .update({ role })
-        .eq("id", id);
-      if (error) throw error;
+      const res = await setUserRoleAction(id, role);
+      if (res.error) throw new Error(res.error);
       toast.success("Role updated.");
       router.refresh();
     } catch (e) {
@@ -99,13 +98,15 @@ export function UsersTable({ data }: { data: Profile[] }) {
   async function setApproved(id: string, approved: boolean) {
     setBusyId(id);
     try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("profiles")
-        .update({ approved })
-        .eq("id", id);
-      if (error) throw error;
-      toast.success(approved ? "User approved." : "User access revoked.");
+      const res = await setUserApprovedAction(id, approved);
+      if (res.error) throw new Error(res.error);
+      if (res.warning) {
+        toast.warning(res.warning);
+      } else if (approved) {
+        toast.success("User approved. Notification email sent.");
+      } else {
+        toast.success("User access revoked.");
+      }
       router.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to update access.");

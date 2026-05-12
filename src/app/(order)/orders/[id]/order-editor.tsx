@@ -1,15 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Grid from "@mui/material/Grid";
 import Typography from "@mui/material/Typography";
-import Paper from "@mui/material/Paper";
 import CircularProgress from "@mui/material/CircularProgress";
+import Radio from "@mui/material/Radio";
 import CheckIcon from "@mui/icons-material/Check";
-import SaveIcon from "@mui/icons-material/Save";
 import ShareIcon from "@mui/icons-material/IosShare";
 import DeleteIcon from "@mui/icons-material/DeleteOutlined";
 import LocalShippingIcon from "@mui/icons-material/LocalShippingOutlined";
@@ -21,7 +20,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { SALES_FORM_SECTIONS, BUILD_FORM_SECTIONS } from "@/lib/constants";
+import {
+  SALES_FORM_SECTIONS,
+  SALES_SECTION_LAYOUT,
+  BUILD_FORM_SECTIONS,
+  BUILD_SECTION_LAYOUT,
+  DEFAULT_BUILD_SECTION_LAYOUT,
+} from "@/lib/constants";
 import { createClient } from "@/lib/supabase/client";
 import { useConfirm } from "@/components/confirm/confirm-provider";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -38,19 +43,36 @@ type SalesSpec = Database["public"]["Tables"]["sales_specs"]["Row"];
 type BuildSpec = Database["public"]["Tables"]["build_specs"]["Row"];
 type Selection =
   Database["public"]["Tables"]["order_sales_selections"]["Row"];
-type Extra = Database["public"]["Tables"]["order_build_extras"]["Row"];
+type BuildExtraRow = Database["public"]["Tables"]["order_build_extras"]["Row"];
+type SalesExtraRow = Database["public"]["Tables"]["order_sales_extras"]["Row"];
+
+type AddonSection = "CABIN_ADDONS" | "MISC_ADDONS" | "EXTERIOR_ADDONS";
+
+type SalesExtraDraft = {
+  id?: string;
+  tempId: string;
+  section: AddonSection;
+  name: string;
+  price: number;
+};
 
 type Props = {
   order: Order;
   salesSpecs: SalesSpec[];
   buildSpecs: BuildSpec[];
   selections: Selection[];
-  extras: Extra[];
+  extras: BuildExtraRow[];
+  salesExtras?: SalesExtraRow[];
+  /** When false, the editor renders in read-only mode (no auto-save, inputs
+   *  disabled). Defaults to true. */
+  canEdit?: boolean;
 };
 
 const ADDON_OR_COLOR = new Set<string>(
   SALES_FORM_SECTIONS.filter((s) => s.kind !== "spec").map((s) => s.key),
 );
+
+const AUTOSAVE_DEBOUNCE_MS = 600;
 
 export function OrderEditor({
   order,
@@ -58,9 +80,12 @@ export function OrderEditor({
   buildSpecs,
   selections,
   extras,
+  salesExtras = [],
+  canEdit = true,
 }: Props) {
   const router = useRouter();
   const confirm = useConfirm();
+  const supabase = useMemo(() => createClient(), []);
 
   const [customerName, setCustomerName] = useState(order.customer_name);
   const [orderDate, setOrderDate] = useState<string>(
@@ -83,6 +108,15 @@ export function OrderEditor({
   >(
     extras.map((e) => ({ id: e.id, tempId: e.id, name: e.name })),
   );
+  const [customSalesExtras, setCustomSalesExtras] = useState<SalesExtraDraft[]>(
+    salesExtras.map((e) => ({
+      id: e.id,
+      tempId: e.id,
+      section: e.section as AddonSection,
+      name: e.name,
+      price: Number(e.price ?? 0),
+    })),
+  );
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -95,27 +129,40 @@ export function OrderEditor({
         total += Number(spec.price ?? 0);
       }
     }
+    for (const ce of customSalesExtras) {
+      if (ce.name.trim()) total += Number(ce.price ?? 0);
+    }
     return total;
-  }, [salesSpecs, selected]);
+  }, [salesSpecs, selected, customSalesExtras]);
 
   const total = Number(mainPrice) + addonsPrice;
 
-  useEffect(() => {
-    const selectedWall = salesSpecs.find(
-      (s) => s.section === "WALL_COLOR" && selected[s.id],
-    );
-    if (selectedWall) setFabricColor(selectedWall.name);
-  }, [selected, salesSpecs]);
+  const selectedWallSpec = useMemo(
+    () =>
+      salesSpecs.find(
+        (s) => s.section === "WALL_COLOR" && selected[s.id],
+      ) ?? null,
+    [salesSpecs, selected],
+  );
+  const selectedFloorSpec = useMemo(
+    () =>
+      salesSpecs.find(
+        (s) => s.section === "FLOOR_COLOR" && selected[s.id],
+      ) ?? null,
+    [salesSpecs, selected],
+  );
 
+  // Keep orders.fabric_color / orders.floor_color (text columns) in sync
+  // with the radio-selected swatches.
   useEffect(() => {
-    const selectedFloor = salesSpecs.find(
-      (s) => s.section === "FLOOR_COLOR" && selected[s.id],
-    );
-    if (selectedFloor) setFloorColor(selectedFloor.name);
-  }, [selected, salesSpecs]);
+    setFabricColor(selectedWallSpec?.name ?? null);
+  }, [selectedWallSpec]);
+  useEffect(() => {
+    setFloorColor(selectedFloorSpec?.name ?? null);
+  }, [selectedFloorSpec]);
 
   const selectedAddonNames = useMemo(() => {
-    return salesSpecs
+    const fromCatalog = salesSpecs
       .filter(
         (s) =>
           (s.section === "CABIN_ADDONS" ||
@@ -124,7 +171,11 @@ export function OrderEditor({
           selected[s.id],
       )
       .map((s) => ({ id: s.id, name: s.name, price: Number(s.price ?? 0) }));
-  }, [salesSpecs, selected]);
+    const fromCustom = customSalesExtras
+      .filter((e) => e.name.trim())
+      .map((e) => ({ id: e.tempId, name: e.name, price: Number(e.price ?? 0) }));
+    return [...fromCatalog, ...fromCustom];
+  }, [salesSpecs, selected, customSalesExtras]);
 
   const toggle = useCallback(
     (specId: string) =>
@@ -132,22 +183,75 @@ export function OrderEditor({
     [],
   );
 
-  async function onSave() {
+  /** Radio-style selection: at most one spec selected per color section. */
+  const selectColor = useCallback(
+    (specId: string, sectionKey: string) => {
+      setSelected((prev) => {
+        const next: Record<string, boolean> = { ...prev };
+        for (const s of salesSpecs) {
+          if (s.section === sectionKey) next[s.id] = false;
+        }
+        next[specId] = !prev[specId];
+        return next;
+      });
+    },
+    [salesSpecs],
+  );
+
+  // -------- Auto-save --------
+  const isMountedRef = useRef(false);
+  const flushingRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Snapshot of latest state for flushes that fire outside React's render
+  // cycle (e.g. window beforeunload).
+  const stateRef = useRef({
+    customerName,
+    orderDate,
+    salesNotes,
+    buildNotes,
+    fabricColor,
+    floorColor,
+    selected,
+    otherExtras,
+    customSalesExtras,
+    mainPrice,
+    addonsPrice,
+    total,
+  });
+  stateRef.current = {
+    customerName,
+    orderDate,
+    salesNotes,
+    buildNotes,
+    fabricColor,
+    floorColor,
+    selected,
+    otherExtras,
+    customSalesExtras,
+    mainPrice,
+    addonsPrice,
+    total,
+  };
+
+  const flushNow = useCallback(async () => {
+    if (flushingRef.current) return;
+    flushingRef.current = true;
     setSaving(true);
     try {
-      const supabase = createClient();
+      const s = stateRef.current;
+
       const { error: oerr } = await supabase
         .from("orders")
         .update({
-          customer_name: customerName.trim() || "Unnamed",
-          order_date: orderDate,
-          sales_notes: salesNotes,
-          build_notes: buildNotes,
-          fabric_color: fabricColor,
-          floor_color: floorColor,
-          main_price: mainPrice,
-          addons_price: addonsPrice,
-          total,
+          customer_name: s.customerName.trim() || "Unnamed",
+          order_date: s.orderDate,
+          sales_notes: s.salesNotes,
+          build_notes: s.buildNotes,
+          fabric_color: s.fabricColor,
+          floor_color: s.floorColor,
+          main_price: s.mainPrice,
+          addons_price: s.addonsPrice,
+          total: s.total,
         })
         .eq("id", order.id);
       if (oerr) throw oerr;
@@ -157,7 +261,7 @@ export function OrderEditor({
         .delete()
         .eq("order_id", order.id);
       if (delErr) throw delErr;
-      const toInsert = Object.entries(selected)
+      const toInsert = Object.entries(s.selected)
         .filter(([, v]) => v)
         .map(([id]) => ({
           order_id: order.id,
@@ -176,7 +280,7 @@ export function OrderEditor({
         .delete()
         .eq("order_id", order.id);
       if (dext) throw dext;
-      const extrasInsert = otherExtras
+      const extrasInsert = s.otherExtras
         .filter((e) => e.name.trim())
         .map((e, i) => ({
           order_id: order.id,
@@ -190,15 +294,84 @@ export function OrderEditor({
         if (error) throw error;
       }
 
-      toast.success("Order saved.");
-      router.refresh();
+      // Custom sales add-ons (per section, with price).
+      const { error: dse } = await supabase
+        .from("order_sales_extras")
+        .delete()
+        .eq("order_id", order.id);
+      if (dse) throw dse;
+      const salesExtrasInsert = s.customSalesExtras
+        .filter((e) => e.name.trim())
+        .map((e, i) => ({
+          order_id: order.id,
+          section: e.section,
+          name: e.name.trim(),
+          price: Number(e.price ?? 0),
+          sort_order: i,
+        }));
+      if (salesExtrasInsert.length) {
+        const { error } = await supabase
+          .from("order_sales_extras")
+          .insert(salesExtrasInsert);
+        if (error) throw error;
+      }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save.");
+      toast.error(e instanceof Error ? e.message : "Auto-save failed.");
     } finally {
+      flushingRef.current = false;
       setSaving(false);
     }
-  }
+  }, [order.id, supabase]);
 
+  // Debounce a save whenever any editable state changes (only when the
+  // current viewer is allowed to edit).
+  useEffect(() => {
+    if (!canEdit) return;
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
+      return;
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => void flushNow(), AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [
+    canEdit,
+    customerName,
+    orderDate,
+    salesNotes,
+    buildNotes,
+    fabricColor,
+    floorColor,
+    selected,
+    otherExtras,
+    customSalesExtras,
+    mainPrice,
+    addonsPrice,
+    total,
+    flushNow,
+  ]);
+
+  // Best-effort flush on tab close, plus a final flush on unmount.
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (!timerRef.current && !flushingRef.current) return;
+      void flushNow();
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        void flushNow();
+      }
+    };
+  }, [flushNow]);
+
+  // -------- Actions --------
   async function copyShareLink() {
     const url = typeof window !== "undefined" ? window.location.href : "";
     try {
@@ -220,7 +393,6 @@ export function OrderEditor({
       cancelText: "Cancel",
       tone: "danger",
       onConfirm: async () => {
-        const supabase = createClient();
         const { error } = await supabase
           .from("orders")
           .delete()
@@ -291,32 +463,45 @@ export function OrderEditor({
                 gap: 2,
               }}
             >
-              <Box>
+              <Box sx={{ minWidth: 0 }}>
                 <Typography
-                  variant="caption"
+                  variant="h3"
                   sx={{
-                    color: "text.secondary",
-                    textTransform: "uppercase",
-                    letterSpacing: 0.5,
+                    fontWeight: 700,
+                    fontSize: { xs: 28, sm: 34, md: 40 },
+                    lineHeight: 1.15,
+                    letterSpacing: "-0.01em",
+                    wordBreak: "break-word",
                   }}
                 >
                   {order.van_model?.name ?? "Van Model"}
                 </Typography>
-                <Typography variant="h5" sx={{ fontWeight: 600 }}>
-                  Order for{" "}
-                  <Box component="span" sx={{ color: "primary.main" }}>
-                    {customerName || "—"}
-                  </Box>
-                </Typography>
                 <Typography
                   variant="body2"
                   color="text.secondary"
-                  sx={{ mt: 0.5 }}
+                  sx={{ mt: 0.75 }}
                 >
                   Created {formatDate(order.created_at)}
                 </Typography>
               </Box>
-              <Stack direction="row" spacing={1}>
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ alignItems: "center", flexShrink: 0 }}
+              >
+                {canEdit ? (
+                  <SaveStatus saving={saving} />
+                ) : (
+                  <Box
+                    sx={{
+                      fontSize: 12,
+                      color: "text.secondary",
+                      px: 0.5,
+                    }}
+                  >
+                    View only
+                  </Box>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -331,26 +516,11 @@ export function OrderEditor({
                 >
                   {copied ? "Copied" : "Share"}
                 </Button>
-                <Button variant="outline" size="icon" onClick={onDelete}>
-                  <DeleteIcon sx={{ fontSize: 18 }} />
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={onSave}
-                  disabled={saving}
-                  startIcon={
-                    saving ? (
-                      <CircularProgress
-                        size={14}
-                        sx={{ color: "currentColor" }}
-                      />
-                    ) : (
-                      <SaveIcon sx={{ fontSize: 16 }} />
-                    )
-                  }
-                >
-                  Save
-                </Button>
+                {canEdit && (
+                  <Button variant="outline" size="icon" onClick={onDelete}>
+                    <DeleteIcon sx={{ fontSize: 18 }} />
+                  </Button>
+                )}
               </Stack>
             </Box>
 
@@ -360,6 +530,7 @@ export function OrderEditor({
                 <Input
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
+                  disabled={!canEdit}
                 />
               </Grid>
               <Grid size={{ xs: 12, sm: 6 }}>
@@ -368,6 +539,7 @@ export function OrderEditor({
                   type="date"
                   value={orderDate}
                   onChange={(e) => setOrderDate(e.target.value)}
+                  disabled={!canEdit}
                 />
               </Grid>
             </Grid>
@@ -386,13 +558,17 @@ export function OrderEditor({
             salesSpecs={salesSpecs}
             selected={selected}
             onToggle={toggle}
-            fabricColor={fabricColor}
-            floorColor={floorColor}
+            onSelectColor={selectColor}
+            selectedWallSpec={selectedWallSpec}
+            selectedFloorSpec={selectedFloorSpec}
+            customSalesExtras={customSalesExtras}
+            setCustomSalesExtras={setCustomSalesExtras}
             mainPrice={Number(mainPrice)}
             addonsPrice={addonsPrice}
             total={total}
             salesNotes={salesNotes}
             setSalesNotes={setSalesNotes}
+            canEdit={canEdit}
           />
         </TabsContent>
 
@@ -404,26 +580,38 @@ export function OrderEditor({
             setExtras={setOtherExtras}
             buildNotes={buildNotes}
             setBuildNotes={setBuildNotes}
+            canEdit={canEdit}
           />
         </TabsContent>
       </Tabs>
-
-      <Box sx={{ display: "flex", justifyContent: "flex-end", pb: 3 }}>
-        <Button
-          onClick={onSave}
-          disabled={saving}
-          startIcon={
-            saving ? (
-              <CircularProgress size={16} sx={{ color: "currentColor" }} />
-            ) : (
-              <SaveIcon sx={{ fontSize: 18 }} />
-            )
-          }
-        >
-          Save order
-        </Button>
-      </Box>
     </Stack>
+  );
+}
+
+function SaveStatus({ saving }: { saving: boolean }) {
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        gap: 0.75,
+        fontSize: 12,
+        color: "text.secondary",
+        pr: 0.5,
+      }}
+    >
+      {saving ? (
+        <>
+          <CircularProgress size={14} />
+          <Box component="span">Saving…</Box>
+        </>
+      ) : (
+        <>
+          <CheckIcon sx={{ fontSize: 16, color: "success.main" }} />
+          <Box component="span">All changes saved</Box>
+        </>
+      )}
+    </Box>
   );
 }
 
@@ -431,37 +619,379 @@ function SalesFormView({
   salesSpecs,
   selected,
   onToggle,
-  fabricColor,
-  floorColor,
+  onSelectColor,
+  selectedWallSpec,
+  selectedFloorSpec,
+  customSalesExtras,
+  setCustomSalesExtras,
   mainPrice,
   addonsPrice,
   total,
   salesNotes,
   setSalesNotes,
+  canEdit,
 }: {
   salesSpecs: SalesSpec[];
   selected: Record<string, boolean>;
   onToggle: (id: string) => void;
-  fabricColor: string | null;
-  floorColor: string | null;
+  onSelectColor: (id: string, sectionKey: string) => void;
+  selectedWallSpec: SalesSpec | null;
+  selectedFloorSpec: SalesSpec | null;
+  customSalesExtras: SalesExtraDraft[];
+  setCustomSalesExtras: React.Dispatch<React.SetStateAction<SalesExtraDraft[]>>;
   mainPrice: number;
   addonsPrice: number;
   total: number;
   salesNotes: string;
   setSalesNotes: (s: string) => void;
+  canEdit: boolean;
 }) {
+  function addCustomExtra(section: AddonSection) {
+    setCustomSalesExtras((prev) => [
+      ...prev,
+      {
+        tempId: Math.random().toString(36).slice(2, 9),
+        section,
+        name: "",
+        price: 0,
+      },
+    ]);
+  }
+  function updateCustomExtra(
+    tempId: string,
+    patch: Partial<Pick<SalesExtraDraft, "name" | "price">>,
+  ) {
+    setCustomSalesExtras((prev) =>
+      prev.map((e) => (e.tempId === tempId ? { ...e, ...patch } : e)),
+    );
+  }
+  function removeCustomExtra(tempId: string) {
+    setCustomSalesExtras((prev) => prev.filter((e) => e.tempId !== tempId));
+  }
   return (
     <Stack spacing={2.5}>
       <Grid container spacing={2.5}>
         {SALES_FORM_SECTIONS.map((section) => {
-          const sectionSpecs = salesSpecs.filter(
-            (s) => s.section === section.key,
+          const layout = SALES_SECTION_LAYOUT[section.key];
+          const sectionSpecs = salesSpecs
+            .filter((s) => s.section === section.key)
+            .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+          // --- Color sections render as image cards with a radio underneath. ---
+          const renderColorCard = (spec: SalesSpec) => {
+            const checked = !!selected[spec.id];
+            return (
+              <Box
+                key={spec.id}
+                onClick={() => {
+                  if (canEdit) onSelectColor(spec.id, section.key);
+                }}
+                sx={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: 0.5,
+                  p: 1,
+                  borderRadius: 1.5,
+                  border: 1,
+                  borderColor: checked ? "primary.main" : "divider",
+                  backgroundColor: checked
+                    ? "rgba(71, 85, 105, 0.06)"
+                    : "background.default",
+                  boxShadow: checked ? 2 : 0,
+                  transition: "all 0.15s",
+                  cursor: canEdit ? "pointer" : "default",
+                  width: 96,
+                  opacity: !canEdit && !checked ? 0.85 : 1,
+                }}
+              >
+                <Box
+                  sx={{
+                    width: 76,
+                    height: 76,
+                    borderRadius: 1,
+                    overflow: "hidden",
+                    border: "1px solid rgba(0,0,0,0.12)",
+                    backgroundColor: "rgba(0,0,0,0.04)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {spec.image_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={spec.image_url}
+                      alt=""
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
+                        display: "block",
+                      }}
+                    />
+                  ) : null}
+                </Box>
+                <Radio
+                  size="small"
+                  checked={checked}
+                  disabled={!canEdit}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => {
+                    if (canEdit) onSelectColor(spec.id, section.key);
+                  }}
+                  sx={{ p: 0.25 }}
+                />
+              </Box>
+            );
+          };
+
+          // --- Addon rows: name on the left, price on the right (justify-between). ---
+          const renderAddonRow = (spec: SalesSpec) => {
+            const checked = !!selected[spec.id];
+            return (
+              <Box
+                key={spec.id}
+                onClick={() => {
+                  if (canEdit) onToggle(spec.id);
+                }}
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 1.5,
+                  borderRadius: 1.5,
+                  border: 1,
+                  borderColor: checked ? "primary.main" : "divider",
+                  backgroundColor: checked
+                    ? "rgba(71, 85, 105, 0.06)"
+                    : "background.default",
+                  px: 1.5,
+                  py: 1,
+                  transition: "all 0.15s",
+                  cursor: canEdit ? "pointer" : "default",
+                  opacity: !canEdit && !checked ? 0.85 : 1,
+                }}
+              >
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={() => canEdit && onToggle(spec.id)}
+                  disabled={!canEdit}
+                  onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                />
+                <Typography
+                  sx={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 500 }}
+                >
+                  {spec.name || (
+                    <Box
+                      component="span"
+                      sx={{
+                        color: "text.secondary",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      (unnamed)
+                    </Box>
+                  )}
+                </Typography>
+                {Number(spec.price) > 0 && (
+                  <Typography
+                    sx={{
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: "text.primary",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {formatCurrency(spec.price)}
+                  </Typography>
+                )}
+              </Box>
+            );
+          };
+
+          // --- Plain spec rows: bullet + name. ---
+          const renderSpecRow = (spec: SalesSpec) => (
+            <Box
+              key={spec.id}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                borderRadius: 1.5,
+                border: 1,
+                borderColor: "divider",
+                backgroundColor: "background.default",
+                px: 1.5,
+                py: 1,
+              }}
+            >
+              <Box
+                sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  backgroundColor: "primary.main",
+                  flexShrink: 0,
+                }}
+              />
+              <Typography sx={{ fontSize: 14, fontWeight: 500 }}>
+                {spec.name || (
+                  <Box
+                    component="span"
+                    sx={{ color: "text.secondary", fontStyle: "italic" }}
+                  >
+                    (unnamed)
+                  </Box>
+                )}
+              </Typography>
+            </Box>
           );
-          const isCheckable =
-            section.kind === "addon" || section.kind === "color";
+
+          // Custom (off-catalog) add-ons for this addon section.
+          const sectionCustomExtras =
+            section.kind === "addon"
+              ? customSalesExtras.filter(
+                  (e) => e.section === (section.key as AddonSection),
+                )
+              : [];
+          const renderCustomExtraRow = (e: SalesExtraDraft) => (
+            <Box
+              key={e.tempId}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                borderRadius: 1.5,
+                border: 1,
+                borderStyle: "dashed",
+                borderColor: "divider",
+                backgroundColor: "rgba(71, 85, 105, 0.04)",
+                px: 1.5,
+                py: 0.75,
+              }}
+            >
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Input
+                  value={e.name}
+                  onChange={(ev) =>
+                    updateCustomExtra(e.tempId, { name: ev.target.value })
+                  }
+                  placeholder="Custom add-on name"
+                  disabled={!canEdit}
+                />
+              </Box>
+              <Box sx={{ width: 110, flexShrink: 0 }}>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  value={e.price}
+                  onChange={(ev) =>
+                    updateCustomExtra(e.tempId, {
+                      price: Number.parseFloat(ev.target.value) || 0,
+                    })
+                  }
+                  placeholder="Price"
+                  disabled={!canEdit}
+                />
+              </Box>
+              {canEdit && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => removeCustomExtra(e.tempId)}
+                  sx={{ color: "error.main" }}
+                >
+                  <DeleteIcon sx={{ fontSize: 18 }} />
+                </Button>
+              )}
+            </Box>
+          );
+
+          let itemsNode: React.ReactNode;
+          if (section.kind === "color") {
+            itemsNode =
+              sectionSpecs.length === 0 ? (
+                <EmptyHint label={section.label} />
+              ) : (
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.25 }}>
+                  {sectionSpecs.map(renderColorCard)}
+                </Box>
+              );
+          } else if (section.kind === "addon") {
+            const catalogNode =
+              sectionSpecs.length === 0 ? null : layout.itemsLayout ===
+                "grid2" ? (
+                <Box
+                  sx={{
+                    display: "grid",
+                    gap: 1,
+                    gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+                  }}
+                >
+                  {sectionSpecs.map(renderAddonRow)}
+                </Box>
+              ) : (
+                <Stack spacing={1}>{sectionSpecs.map(renderAddonRow)}</Stack>
+              );
+
+            const customNode =
+              sectionCustomExtras.length === 0 ? null : layout.itemsLayout ===
+                "grid2" ? (
+                <Box
+                  sx={{
+                    display: "grid",
+                    gap: 1,
+                    gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+                  }}
+                >
+                  {sectionCustomExtras.map(renderCustomExtraRow)}
+                </Box>
+              ) : (
+                <Stack spacing={1}>
+                  {sectionCustomExtras.map(renderCustomExtraRow)}
+                </Stack>
+              );
+
+            itemsNode = (
+              <Stack spacing={1.25}>
+                {catalogNode}
+                {customNode}
+                {sectionSpecs.length === 0 &&
+                  sectionCustomExtras.length === 0 &&
+                  !canEdit && <EmptyHint label={section.label} />}
+                {canEdit && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "flex-start",
+                      pt: 0.5,
+                    }}
+                  >
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        addCustomExtra(section.key as AddonSection)
+                      }
+                    >
+                      + Add custom add-on
+                    </Button>
+                  </Box>
+                )}
+              </Stack>
+            );
+          } else {
+            itemsNode =
+              sectionSpecs.length === 0 ? (
+                <EmptyHint label={section.label} />
+              ) : (
+                <Stack spacing={1}>{sectionSpecs.map(renderSpecRow)}</Stack>
+              );
+          }
+
           return (
-            <Grid key={section.key} size={{ xs: 12, lg: 6 }}>
-              <Card>
+            <Grid key={section.key} size={{ xs: 12, lg: layout.colsLg }}>
+              <Card sx={{ height: "100%" }}>
                 <Box sx={{ p: 2.5 }}>
                   <Typography
                     sx={{
@@ -474,103 +1004,7 @@ function SalesFormView({
                   >
                     {section.label}
                   </Typography>
-
-                  {sectionSpecs.length === 0 ? (
-                    <Box
-                      sx={{
-                        borderRadius: 1.5,
-                        border: 1,
-                        borderStyle: "dashed",
-                        borderColor: "divider",
-                        backgroundColor: "rgba(0,0,0,0.02)",
-                        px: 2,
-                        py: 2.5,
-                        textAlign: "center",
-                        fontSize: 12,
-                        color: "text.secondary",
-                      }}
-                    >
-                      No {section.label.toLowerCase()} configured for this
-                      model.
-                    </Box>
-                  ) : (
-                    <Stack spacing={1}>
-                      {sectionSpecs.map((spec) => {
-                        const checked = !!selected[spec.id];
-                        const highlighted = isCheckable && checked;
-                        return (
-                          <Box
-                            key={spec.id}
-                            sx={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 1.5,
-                              borderRadius: 1.5,
-                              border: 1,
-                              borderColor: highlighted
-                                ? "primary.main"
-                                : "divider",
-                              backgroundColor: highlighted
-                                ? "rgba(71, 85, 105, 0.06)"
-                                : "background.default",
-                              px: 1.5,
-                              py: 1,
-                              transition: "all 0.15s",
-                            }}
-                          >
-                            {isCheckable && (
-                              <Checkbox
-                                checked={checked}
-                                onCheckedChange={() => onToggle(spec.id)}
-                              />
-                            )}
-                            {section.kind === "color" && spec.image_url && (
-                              /* eslint-disable-next-line @next/next/no-img-element */
-                              <img
-                                src={spec.image_url}
-                                alt={spec.name}
-                                style={{
-                                  height: 48,
-                                  width: 48,
-                                  borderRadius: 6,
-                                  objectFit: "cover",
-                                  border: "1px solid rgba(0,0,0,0.12)",
-                                }}
-                              />
-                            )}
-                            <Box sx={{ flex: 1 }}>
-                              <Typography
-                                sx={{
-                                  fontSize: 14,
-                                  fontWeight: 500,
-                                }}
-                              >
-                                {spec.name || (
-                                  <Box
-                                    component="span"
-                                    sx={{
-                                      color: "text.secondary",
-                                      fontStyle: "italic",
-                                    }}
-                                  >
-                                    (unnamed)
-                                  </Box>
-                                )}
-                              </Typography>
-                              {Number(spec.price) > 0 && (
-                                <Typography
-                                  variant="caption"
-                                  color="text.secondary"
-                                >
-                                  {formatCurrency(spec.price)}
-                                </Typography>
-                              )}
-                            </Box>
-                          </Box>
-                        );
-                      })}
-                    </Stack>
-                  )}
+                  {itemsNode}
                 </Box>
               </Card>
             </Grid>
@@ -592,10 +1026,10 @@ function SalesFormView({
           </Typography>
           <Grid container spacing={1.5}>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <SummaryRow label="Fabric color" value={fabricColor ?? "—"} />
+              <ColorSummaryRow label="Fabric color" spec={selectedWallSpec} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <SummaryRow label="Floor color" value={floorColor ?? "—"} />
+              <ColorSummaryRow label="Floor color" spec={selectedFloorSpec} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <SummaryRow label="Main price" value={formatCurrency(mainPrice)} />
@@ -643,11 +1077,33 @@ function SalesFormView({
               value={salesNotes}
               onChange={(e) => setSalesNotes(e.target.value)}
               placeholder="Internal notes about this sale..."
+              disabled={!canEdit}
             />
           </Box>
         </Stack>
       </Card>
     </Stack>
+  );
+}
+
+function EmptyHint({ label }: { label: string }) {
+  return (
+    <Box
+      sx={{
+        borderRadius: 1.5,
+        border: 1,
+        borderStyle: "dashed",
+        borderColor: "divider",
+        backgroundColor: "rgba(0,0,0,0.02)",
+        px: 2,
+        py: 2.5,
+        textAlign: "center",
+        fontSize: 12,
+        color: "text.secondary",
+      }}
+    >
+      No {label.toLowerCase()} configured for this model.
+    </Box>
   );
 }
 
@@ -687,6 +1143,73 @@ function SummaryRow({
   );
 }
 
+function ColorSummaryRow({
+  label,
+  spec,
+}: {
+  label: string;
+  spec: SalesSpec | null;
+}) {
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 1,
+        borderRadius: 1.5,
+        border: 1,
+        borderColor: "divider",
+        backgroundColor: "rgba(0,0,0,0.02)",
+        px: 1.5,
+        py: 1,
+        minHeight: 56,
+      }}
+    >
+      <Typography
+        variant="caption"
+        sx={{
+          textTransform: "uppercase",
+          letterSpacing: 0.5,
+          color: "text.secondary",
+        }}
+      >
+        {label}
+      </Typography>
+      {spec?.image_url ? (
+        <Box
+          sx={{
+            width: 40,
+            height: 40,
+            borderRadius: 1,
+            overflow: "hidden",
+            border: "1px solid rgba(0,0,0,0.12)",
+            flexShrink: 0,
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={spec.image_url}
+            alt=""
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              display: "block",
+            }}
+          />
+        </Box>
+      ) : (
+        <Typography
+          sx={{ fontSize: 14, fontWeight: 500, color: "text.secondary" }}
+        >
+          —
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
 function BuildFormView({
   buildSpecs,
   selectedAddons,
@@ -694,6 +1217,7 @@ function BuildFormView({
   setExtras,
   buildNotes,
   setBuildNotes,
+  canEdit,
 }: {
   buildSpecs: BuildSpec[];
   selectedAddons: { id: string; name: string; price: number }[];
@@ -703,6 +1227,7 @@ function BuildFormView({
   >;
   buildNotes: string;
   setBuildNotes: (s: string) => void;
+  canEdit: boolean;
 }) {
   function addExtra() {
     setExtras((prev) => [
@@ -723,12 +1248,91 @@ function BuildFormView({
     <Stack spacing={2.5}>
       <Grid container spacing={2.5}>
         {BUILD_FORM_SECTIONS.map((section) => {
-          const sectionSpecs = buildSpecs.filter(
-            (b) => b.section === section.key,
+          const layout =
+            BUILD_SECTION_LAYOUT[section.key] ?? DEFAULT_BUILD_SECTION_LAYOUT;
+          const sectionSpecs = buildSpecs
+            .filter((b) => b.section === section.key)
+            .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+          const renderRow = (s: BuildSpec) => (
+            <Box
+              key={s.id}
+              sx={{
+                display: "flex",
+                alignItems: "center",
+                gap: 1,
+                borderRadius: 1.5,
+                border: 1,
+                borderColor: "divider",
+                backgroundColor: "rgba(0,0,0,0.02)",
+                px: 1.5,
+                py: 1,
+                fontSize: 14,
+              }}
+            >
+              <Box
+                sx={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  backgroundColor: "primary.main",
+                  flexShrink: 0,
+                }}
+              />
+              <Typography sx={{ fontSize: 14, fontWeight: 500 }}>
+                {s.name || (
+                  <Box
+                    component="span"
+                    sx={{ color: "text.secondary", fontStyle: "italic" }}
+                  >
+                    (unnamed)
+                  </Box>
+                )}
+              </Typography>
+            </Box>
           );
+
+          let itemsNode: React.ReactNode;
+          if (sectionSpecs.length === 0) {
+            itemsNode = (
+              <Box
+                sx={{
+                  borderRadius: 1.5,
+                  border: 1,
+                  borderStyle: "dashed",
+                  borderColor: "divider",
+                  backgroundColor: "rgba(0,0,0,0.02)",
+                  px: 2,
+                  py: 2.5,
+                  textAlign: "center",
+                  fontSize: 12,
+                  color: "text.secondary",
+                }}
+              >
+                No {section.label.toLowerCase()} configured.
+              </Box>
+            );
+          } else if (layout.itemsLayout === "grid2") {
+            itemsNode = (
+              <Box
+                sx={{
+                  display: "grid",
+                  gap: 1,
+                  gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+                }}
+              >
+                {sectionSpecs.map(renderRow)}
+              </Box>
+            );
+          } else {
+            itemsNode = (
+              <Stack spacing={1}>{sectionSpecs.map(renderRow)}</Stack>
+            );
+          }
+
           return (
-            <Grid key={section.key} size={{ xs: 12, lg: 6 }}>
-              <Card>
+            <Grid key={section.key} size={{ xs: 12, lg: layout.colsLg }}>
+              <Card sx={{ height: "100%" }}>
                 <Box sx={{ p: 2.5 }}>
                   <Typography
                     sx={{
@@ -741,48 +1345,7 @@ function BuildFormView({
                   >
                     {section.label}
                   </Typography>
-                  {sectionSpecs.length === 0 ? (
-                    <Box
-                      sx={{
-                        borderRadius: 1.5,
-                        border: 1,
-                        borderStyle: "dashed",
-                        borderColor: "divider",
-                        backgroundColor: "rgba(0,0,0,0.02)",
-                        px: 2,
-                        py: 2.5,
-                        textAlign: "center",
-                        fontSize: 12,
-                        color: "text.secondary",
-                      }}
-                    >
-                      No {section.label.toLowerCase()} configured.
-                    </Box>
-                  ) : (
-                    <Stack spacing={0.75}>
-                      {sectionSpecs.map((s) => (
-                        <Box
-                          key={s.id}
-                          sx={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 1,
-                            fontSize: 14,
-                          }}
-                        >
-                          <Box
-                            sx={{
-                              width: 6,
-                              height: 6,
-                              borderRadius: "50%",
-                              backgroundColor: "primary.main",
-                            }}
-                          />
-                          {s.name}
-                        </Box>
-                      ))}
-                    </Stack>
-                  )}
+                  {itemsNode}
                 </Box>
               </Card>
             </Grid>
@@ -891,9 +1454,11 @@ function BuildFormView({
               >
                 Custom extras
               </Typography>
-              <Button size="sm" variant="outline" onClick={addExtra}>
-                + Add extra
-              </Button>
+              {canEdit && (
+                <Button size="sm" variant="outline" onClick={addExtra}>
+                  + Add extra
+                </Button>
+              )}
             </Box>
             {extras.length === 0 ? (
               <Box
@@ -910,7 +1475,9 @@ function BuildFormView({
                   color: "text.secondary",
                 }}
               >
-                Add custom items not listed in the sales add-ons.
+                {canEdit
+                  ? "Add custom items not listed in the sales add-ons."
+                  : "No custom extras."}
               </Box>
             ) : (
               <Stack spacing={1}>
@@ -926,16 +1493,19 @@ function BuildFormView({
                           updateExtra(e.tempId, ev.target.value)
                         }
                         placeholder="e.g., Custom roof rack"
+                        disabled={!canEdit}
                       />
                     </Box>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      onClick={() => removeExtra(e.tempId)}
-                      sx={{ color: "error.main" }}
-                    >
-                      <DeleteIcon sx={{ fontSize: 18 }} />
-                    </Button>
+                    {canEdit && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => removeExtra(e.tempId)}
+                        sx={{ color: "error.main" }}
+                      >
+                        <DeleteIcon sx={{ fontSize: 18 }} />
+                      </Button>
+                    )}
                   </Box>
                 ))}
               </Stack>
@@ -949,6 +1519,7 @@ function BuildFormView({
               value={buildNotes}
               onChange={(e) => setBuildNotes(e.target.value)}
               placeholder="Build instructions, callouts, or special considerations..."
+              disabled={!canEdit}
             />
           </Box>
         </Stack>

@@ -256,6 +256,43 @@ export type Database = {
           },
         ];
       };
+      order_sales_extras: {
+        Row: {
+          id: string;
+          order_id: string;
+          section: string;
+          name: string;
+          price: number;
+          sort_order: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          order_id: string;
+          section: string;
+          name?: string;
+          price?: number;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          order_id?: string;
+          section?: string;
+          name?: string;
+          price?: number;
+          sort_order?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "order_sales_extras_order_id_fkey";
+            columns: ["order_id"];
+            isOneToOne: false;
+            referencedRelation: "orders";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: { [_ in never]: never };
     Functions: { [_ in never]: never };

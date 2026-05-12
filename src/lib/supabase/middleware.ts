@@ -15,7 +15,13 @@ const PUBLIC_PATHS = [
   "/pending-approval",
 ];
 
+// /orders/<id> is publicly viewable (Share link recipients).
+// /orders (the list) is NOT public.
+const isOrderDetail = (pathname: string) =>
+  /^\/orders\/[^/]+/.test(pathname);
+
 const isPublic = (pathname: string) =>
+  isOrderDetail(pathname) ||
   PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 
 export async function updateSession(request: NextRequest) {

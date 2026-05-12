@@ -4,12 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import VisibilityIcon from "@mui/icons-material/Visibility";
 import VisibilityOffIcon from "@mui/icons-material/VisibilityOff";
-import CheckCircleIcon from "@mui/icons-material/CheckCircleOutlined";
 import CircularProgress from "@mui/material/CircularProgress";
 import Box from "@mui/material/Box";
 import IconButton from "@mui/material/IconButton";
-import Alert from "@mui/material/Alert";
-import AlertTitle from "@mui/material/AlertTitle";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +21,6 @@ export function SignupForm() {
   const [confirm, setConfirm] = useState("");
   const [showPwd, setShowPwd] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [sent, setSent] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,13 +37,11 @@ export function SignupForm() {
     setLoading(true);
     try {
       const supabase = createClient();
-      const redirectUrl = `${window.location.origin}/auth/confirm`;
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: {
           data: { full_name: fullName.trim() },
-          emailRedirectTo: redirectUrl,
         },
       });
       if (error) {
@@ -55,36 +49,14 @@ export function SignupForm() {
         return;
       }
 
-      if (data.user && !data.session) {
-        setSent(true);
-        toast.success("Confirmation email sent.");
-      } else {
-        toast.success("Account created. Awaiting admin approval.");
-        router.push("/pending-approval");
-      }
+      toast.success("Account created. Awaiting admin approval.");
+      router.push("/pending-approval");
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign up failed.");
     } finally {
       setLoading(false);
     }
-  }
-
-  if (sent) {
-    return (
-      <Alert
-        severity="success"
-        icon={<CheckCircleIcon />}
-        sx={{ alignItems: "flex-start", borderRadius: 2 }}
-      >
-        <AlertTitle sx={{ fontWeight: 600 }}>Confirm your email</AlertTitle>
-        We&apos;ve sent a confirmation link to{" "}
-        <Box component="span" sx={{ fontWeight: 600 }}>
-          {email}
-        </Box>
-        . Click the link to activate your account. After confirmation, an
-        administrator must approve your access.
-      </Alert>
-    );
   }
 
   return (

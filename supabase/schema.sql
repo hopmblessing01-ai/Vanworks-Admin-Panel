@@ -111,6 +111,20 @@ create table if not exists public.order_build_extras (
 );
 create index if not exists idx_obe_order on public.order_build_extras(order_id);
 
+-- ---------- order_sales_extras ----------
+-- Custom (off-catalog) add-ons that an order has, on top of the configured
+-- sales_specs add-ons selected via order_sales_selections.
+create table if not exists public.order_sales_extras (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  section text not null check (section in ('CABIN_ADDONS', 'MISC_ADDONS', 'EXTERIOR_ADDONS')),
+  name text not null default '',
+  price numeric(12,2) not null default 0,
+  sort_order int not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_ose_order on public.order_sales_extras(order_id);
+
 -- =============================================================
 -- Row Level Security
 -- =============================================================
@@ -122,6 +136,7 @@ alter table public.build_specs enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_sales_selections enable row level security;
 alter table public.order_build_extras enable row level security;
+alter table public.order_sales_extras enable row level security;
 
 -- Helper: is the current user an admin?
 create or replace function public.is_admin()
@@ -220,6 +235,14 @@ create policy "obe_select" on public.order_build_extras
 
 drop policy if exists "obe_write" on public.order_build_extras;
 create policy "obe_write" on public.order_build_extras
+  for all using (public.is_approved()) with check (public.is_approved());
+
+drop policy if exists "ose_select" on public.order_sales_extras;
+create policy "ose_select" on public.order_sales_extras
+  for select using (auth.role() = 'authenticated');
+
+drop policy if exists "ose_write" on public.order_sales_extras;
+create policy "ose_write" on public.order_sales_extras
   for all using (public.is_approved()) with check (public.is_approved());
 
 -- =============================================================

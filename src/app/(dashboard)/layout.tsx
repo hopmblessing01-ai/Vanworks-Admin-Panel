@@ -24,8 +24,9 @@ export default async function DashboardLayout({
     .eq("id", user.id)
     .maybeSingle();
 
+  // Keep the session alive so /pending-approval can detect approval in
+  // realtime and redirect the user to /dashboard without re-logging-in.
   if (profile && !profile.approved) {
-    await supabase.auth.signOut();
     redirect("/pending-approval");
   }
 

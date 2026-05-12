@@ -29,6 +29,38 @@ export const BUILD_FORM_SECTIONS = [
 export type SalesSectionKey = (typeof SALES_FORM_SECTIONS)[number]["key"];
 export type BuildSectionKey = (typeof BUILD_FORM_SECTIONS)[number]["key"];
 
+// Shared grid layout for sales / build form sections. Used by both the
+// van-model editor and the order-detail viewer so they render identically.
+export type SectionLayout = {
+  colsLg: 4 | 6 | 12;
+  itemsLayout: "stack" | "wrap" | "grid2";
+};
+
+export const SALES_SECTION_LAYOUT: Record<SalesSectionKey, SectionLayout> = {
+  INTERIOR: { colsLg: 4, itemsLayout: "stack" },
+  KITCHEN: { colsLg: 4, itemsLayout: "stack" },
+  ELECTRICAL: { colsLg: 4, itemsLayout: "stack" },
+  WALL_COLOR: { colsLg: 6, itemsLayout: "wrap" },
+  FLOOR_COLOR: { colsLg: 6, itemsLayout: "wrap" },
+  CABIN_ADDONS: { colsLg: 6, itemsLayout: "stack" },
+  MISC_ADDONS: { colsLg: 6, itemsLayout: "stack" },
+  HVAC: { colsLg: 4, itemsLayout: "stack" },
+  GARAGE: { colsLg: 4, itemsLayout: "stack" },
+  EXTERIOR: { colsLg: 4, itemsLayout: "stack" },
+  EXTERIOR_ADDONS: { colsLg: 12, itemsLayout: "grid2" },
+};
+
+export const BUILD_SECTION_LAYOUT: Partial<
+  Record<BuildSectionKey, SectionLayout>
+> = {
+  ELECTRICAL: { colsLg: 12, itemsLayout: "grid2" },
+};
+
+export const DEFAULT_BUILD_SECTION_LAYOUT: SectionLayout = {
+  colsLg: 6,
+  itemsLayout: "stack",
+};
+
 export const ROLES = ["admin", "user"] as const;
 export type Role = (typeof ROLES)[number];
 

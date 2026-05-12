@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* MUI ThemeProvider + CssBaseline handles all theming and resets.
+   Tailwind preflight is disabled (see tailwind.config.ts) so MUI's
+   defaults aren't overridden. Tailwind utility classes still work
+   for layout (flex, grid, gap, spacing, etc.). */
+
+html,
+body {
+  height: 100%;
+}
+
+.hidden-input {
+  display: none;
+}

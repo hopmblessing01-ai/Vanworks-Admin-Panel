@@ -48,6 +48,12 @@ type SalesExtraRow = Database["public"]["Tables"]["order_sales_extras"]["Row"];
 
 type AddonSection = "CABIN_ADDONS" | "MISC_ADDONS" | "EXTERIOR_ADDONS";
 
+/** Sales add-on sections in display order (matches sales sheet). */
+const SALES_ADDON_SECTIONS = SALES_FORM_SECTIONS.filter(
+  (s): s is (typeof SALES_FORM_SECTIONS)[number] & { key: AddonSection } =>
+    s.kind === "addon",
+);
+
 type SalesExtraDraft = {
   id?: string;
   tempId: string;
@@ -161,7 +167,7 @@ export function OrderEditor({
     setFloorColor(selectedFloorSpec?.name ?? null);
   }, [selectedFloorSpec]);
 
-  const selectedAddonNames = useMemo(() => {
+  const selectedSalesAddons = useMemo(() => {
     const fromCatalog = salesSpecs
       .filter(
         (s) =>
@@ -170,10 +176,20 @@ export function OrderEditor({
             s.section === "EXTERIOR_ADDONS") &&
           selected[s.id],
       )
-      .map((s) => ({ id: s.id, name: s.name, price: Number(s.price ?? 0) }));
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        price: Number(s.price ?? 0),
+        section: s.section as AddonSection,
+      }));
     const fromCustom = customSalesExtras
       .filter((e) => e.name.trim())
-      .map((e) => ({ id: e.tempId, name: e.name, price: Number(e.price ?? 0) }));
+      .map((e) => ({
+        id: e.id ?? e.tempId,
+        name: e.name,
+        price: Number(e.price ?? 0),
+        section: e.section,
+      }));
     return [...fromCatalog, ...fromCustom];
   }, [salesSpecs, selected, customSalesExtras]);
 
@@ -575,7 +591,7 @@ export function OrderEditor({
         <TabsContent value="build">
           <BuildFormView
             buildSpecs={buildSpecs}
-            selectedAddons={selectedAddonNames}
+            selectedSalesAddons={selectedSalesAddons}
             extras={otherExtras}
             setExtras={setOtherExtras}
             buildNotes={buildNotes}
@@ -918,6 +934,14 @@ function SalesFormView({
                 </Box>
               );
           } else if (section.kind === "addon") {
+            const sectionAddonTotal =
+              sectionSpecs
+                .filter((s) => selected[s.id])
+                .reduce((acc, s) => acc + Number(s.price ?? 0), 0) +
+              sectionCustomExtras
+                .filter((e) => e.name.trim())
+                .reduce((acc, e) => acc + Number(e.price ?? 0), 0);
+
             const catalogNode =
               sectionSpecs.length === 0 ? null : layout.itemsLayout ===
                 "grid2" ? (
@@ -952,13 +976,55 @@ function SalesFormView({
                 </Stack>
               );
 
+            const hasAnyAddonRows =
+              sectionSpecs.length > 0 || sectionCustomExtras.length > 0;
+            const showEmptyReadOnly =
+              sectionSpecs.length === 0 &&
+              sectionCustomExtras.length === 0 &&
+              !canEdit;
+
             itemsNode = (
               <Stack spacing={1.25}>
                 {catalogNode}
                 {customNode}
-                {sectionSpecs.length === 0 &&
-                  sectionCustomExtras.length === 0 &&
-                  !canEdit && <EmptyHint label={section.label} />}
+                {showEmptyReadOnly && <EmptyHint label={section.label} />}
+                {!showEmptyReadOnly && (
+                  <Box
+                    sx={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      borderRadius: 1.5,
+                      border: 1,
+                      borderColor: "divider",
+                      backgroundColor: "rgba(71, 85, 105, 0.08)",
+                      px: 1.5,
+                      py: 1,
+                      mt: 0.25,
+                    }}
+                  >
+                    <Typography
+                      sx={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        textTransform: "uppercase",
+                        letterSpacing: 0.5,
+                        color: "text.secondary",
+                      }}
+                    >
+                      Section total
+                    </Typography>
+                    <Typography
+                      sx={{
+                        fontSize: 15,
+                        fontWeight: 700,
+                        color: "primary.main",
+                      }}
+                    >
+                      {formatCurrency(sectionAddonTotal)}
+                    </Typography>
+                  </Box>
+                )}
                 {canEdit && (
                   <Box
                     sx={{
@@ -1212,7 +1278,7 @@ function ColorSummaryRow({
 
 function BuildFormView({
   buildSpecs,
-  selectedAddons,
+  selectedSalesAddons,
   extras,
   setExtras,
   buildNotes,
@@ -1220,7 +1286,12 @@ function BuildFormView({
   canEdit,
 }: {
   buildSpecs: BuildSpec[];
-  selectedAddons: { id: string; name: string; price: number }[];
+  selectedSalesAddons: {
+    id: string;
+    name: string;
+    price: number;
+    section: AddonSection;
+  }[];
   extras: { id?: string; tempId: string; name: string }[];
   setExtras: React.Dispatch<
     React.SetStateAction<{ id?: string; tempId: string; name: string }[]>
@@ -1376,10 +1447,10 @@ function BuildFormView({
 
           <Stack spacing={1}>
             <Typography variant="caption" color="text.secondary">
-              Mirrored from the sales form (selected add-ons appear
-              automatically):
+              Mirrored from the sales form, grouped under the same add-on
+              sections (Cabin, Misc, Exterior):
             </Typography>
-            {selectedAddons.length === 0 ? (
+            {selectedSalesAddons.length === 0 ? (
               <Box
                 sx={{
                   borderRadius: 1.5,
@@ -1397,42 +1468,69 @@ function BuildFormView({
                 No add-ons selected on the sales form yet.
               </Box>
             ) : (
-              <Grid container spacing={1}>
-                {selectedAddons.map((a) => (
-                  <Grid key={a.id} size={{ xs: 12, sm: 6 }}>
-                    <Box
-                      sx={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        borderRadius: 1.5,
-                        border: 1,
-                        borderColor: "divider",
-                        backgroundColor: "rgba(0,0,0,0.02)",
-                        px: 1.5,
-                        py: 1,
-                        fontSize: 14,
-                      }}
-                    >
-                      <Box
+              <Stack spacing={2.25}>
+                {SALES_ADDON_SECTIONS.map(({ key, label }) => {
+                  const items = selectedSalesAddons.filter(
+                    (a) => a.section === key,
+                  );
+                  if (items.length === 0) return null;
+                  return (
+                    <Box key={key}>
+                      <Typography
                         sx={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 1,
+                          mb: 1,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          letterSpacing: 0.5,
+                          color: "text.secondary",
                         }}
                       >
-                        <Checkbox checked disabled />
-                        {a.name}
-                      </Box>
-                      {a.price > 0 && (
-                        <Typography variant="caption" color="text.secondary">
-                          {formatCurrency(a.price)}
-                        </Typography>
-                      )}
+                        {label}
+                      </Typography>
+                      <Grid container spacing={1}>
+                        {items.map((a) => (
+                          <Grid key={a.id} size={{ xs: 12, sm: 6 }}>
+                            <Box
+                              sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                borderRadius: 1.5,
+                                border: 1,
+                                borderColor: "divider",
+                                backgroundColor: "rgba(0,0,0,0.02)",
+                                px: 1.5,
+                                py: 1,
+                                fontSize: 14,
+                              }}
+                            >
+                              <Box
+                                sx={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 1,
+                                }}
+                              >
+                                <Checkbox checked disabled />
+                                {a.name}
+                              </Box>
+                              {a.price > 0 && (
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                >
+                                  {formatCurrency(a.price)}
+                                </Typography>
+                              )}
+                            </Box>
+                          </Grid>
+                        ))}
+                      </Grid>
                     </Box>
-                  </Grid>
-                ))}
-              </Grid>
+                  );
+                })}
+              </Stack>
             )}
           </Stack>
 

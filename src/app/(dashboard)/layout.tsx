@@ -4,8 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
 
-const DRAWER_WIDTH = 256;
-
 export default async function DashboardLayout({
   children,
 }: {
@@ -44,7 +42,6 @@ export default async function DashboardLayout({
           flex: 1,
           display: "flex",
           flexDirection: "column",
-          ml: { md: `${DRAWER_WIDTH}px` },
           minWidth: 0,
         }}
       >

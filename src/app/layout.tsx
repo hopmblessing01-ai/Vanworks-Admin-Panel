@@ -14,6 +14,10 @@ const roboto = Roboto({
 export const metadata: Metadata = {
   title: "Vanworks Admin",
   description: "Vanworks admin panel — manage van models, orders, and users.",
+  icons: {
+    icon: [{ url: "/favicon.ico", type: "image/x-icon" }],
+    shortcut: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({

@@ -82,9 +82,21 @@ export function ImageUpload({
               variant="secondary"
               onClick={() => ref.current?.click()}
               disabled={uploading}
+              sx={
+                uploading
+                  ? {
+                      pointerEvents: "none",
+                      "&.Mui-disabled": {
+                        backgroundColor: "secondary.main",
+                        color: "secondary.contrastText",
+                        opacity: 0.92,
+                      },
+                    }
+                  : undefined
+              }
               startIcon={
                 uploading ? (
-                  <CircularProgress size={14} sx={{ color: "currentColor" }} />
+                  <CircularProgress size={14} sx={{ color: "inherit" }} />
                 ) : (
                   <AddPhotoAlternateIcon sx={{ fontSize: 16 }} />
                 )

@@ -138,19 +138,48 @@ export function OrdersListClient({
       <Box
         sx={{
           display: "flex",
+          flexDirection: { xs: "column", md: "row" },
           flexWrap: "wrap",
-          alignItems: "flex-end",
-          justifyContent: "space-between",
+          alignItems: { xs: "stretch", md: "flex-end" },
+          justifyContent: { md: "space-between" },
           gap: 2,
         }}
       >
-        <Stack direction="row" spacing={2} sx={{ flexWrap: "wrap" }}>
-          <Box sx={{ minWidth: 220 }}>
+        {/* Filters stay content-sized on desktop (no flex-grow); full width on mobile */}
+        <Box
+          sx={{
+            display: "flex",
+            flexDirection: { xs: "column", sm: "row" },
+            flexWrap: "wrap",
+            alignItems: { xs: "stretch", sm: "flex-end" },
+            gap: 2,
+            minWidth: 0,
+            width: { xs: "100%", md: "auto" },
+            flex: { md: "0 1 auto" },
+          }}
+        >
+          <Box
+            sx={{
+              width: { xs: "100%", sm: "auto" },
+              minWidth: { xs: 0, sm: 200 },
+              maxWidth: { xs: "100%", sm: 320 },
+              flex: { sm: "0 0 auto" },
+            }}
+          >
             <Label sx={{ fontSize: 11, textTransform: "uppercase", mb: 0.5 }}>
               Model
             </Label>
             <Select value={modelFilter} onValueChange={setModelFilter}>
-              <SelectTrigger>
+              <SelectTrigger
+                sx={{
+                  "& .MuiSelect-select": {
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    display: "block",
+                  },
+                }}
+              >
                 <SelectValue placeholder="All models" />
               </SelectTrigger>
               <SelectContent>
@@ -164,12 +193,28 @@ export function OrdersListClient({
             </Select>
           </Box>
 
-          <Box sx={{ minWidth: 220 }}>
+          <Box
+            sx={{
+              width: { xs: "100%", sm: "auto" },
+              minWidth: { xs: 0, sm: 180 },
+              maxWidth: { xs: "100%", sm: 240 },
+              flex: { sm: "0 0 auto" },
+            }}
+          >
             <Label sx={{ fontSize: 11, textTransform: "uppercase", mb: 0.5 }}>
               Sort by
             </Label>
             <Select value={sort} onValueChange={(v) => setSort(v as typeof sort)}>
-              <SelectTrigger>
+              <SelectTrigger
+                sx={{
+                  "& .MuiSelect-select": {
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    display: "block",
+                  },
+                }}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -178,12 +223,20 @@ export function OrdersListClient({
               </SelectContent>
             </Select>
           </Box>
-        </Stack>
+        </Box>
 
+        <Box
+          sx={{
+            width: { xs: "100%", md: "auto" },
+            flexShrink: 0,
+            alignSelf: { md: "flex-end" },
+          }}
+        >
         <Dialog open={open} onOpenChange={setOpen}>
           <Button
             onClick={() => setOpen(true)}
             startIcon={<AddIcon sx={{ fontSize: 18 }} />}
+            sx={{ width: { xs: "100%", md: "auto" } }}
           >
             New Order
           </Button>
@@ -258,6 +311,7 @@ export function OrdersListClient({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        </Box>
       </Box>
 
       {orders.length === 0 ? (

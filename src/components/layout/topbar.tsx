@@ -5,6 +5,7 @@ import Link from "next/link";
 import AppBar from "@mui/material/AppBar";
 import Toolbar from "@mui/material/Toolbar";
 import Box from "@mui/material/Box";
+import IconButton from "@mui/material/IconButton";
 import Typography from "@mui/material/Typography";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
@@ -17,6 +18,7 @@ import { useState } from "react";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Logo } from "@/components/brand/logo";
+import { MobileNavDrawer } from "@/components/layout/sidebar";
 import { createClient } from "@/lib/supabase/client";
 import { initials } from "@/lib/utils";
 import type { Role } from "@/lib/constants";
@@ -33,6 +35,7 @@ type Props = {
 export function Topbar({ user }: Props) {
   const router = useRouter();
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   async function signOut() {
     const supabase = createClient();
@@ -66,12 +69,26 @@ export function Topbar({ user }: Props) {
           sx={{
             display: { xs: "flex", md: "none" },
             alignItems: "center",
-            gap: 1,
+            gap: 0.5,
           }}
         >
-          <MenuIcon sx={{ color: "text.secondary" }} />
+          <IconButton
+            edge="start"
+            color="inherit"
+            aria-label="Open navigation menu"
+            onClick={() => setMobileNavOpen(true)}
+            sx={{ color: "text.secondary" }}
+          >
+            <MenuIcon />
+          </IconButton>
           <Logo size="sm" />
         </Box>
+
+        <MobileNavDrawer
+          open={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          role={user.role}
+        />
 
         <Box sx={{ display: { xs: "none", md: "block" } }} />
 
